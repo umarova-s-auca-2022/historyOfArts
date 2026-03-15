@@ -1,6 +1,6 @@
 """
-Art History Study Guide Builder
-================================
+Art History Study Guide Builder  —  FIXED VERSION
+===================================================
 Put this file in the SAME folder as your e-course index.html
 (next to all the File_xxx/ subfolders), then run:
 
@@ -12,53 +12,79 @@ Requirements (install once):
     pip install python-docx Pillow
 """
 
-import os, glob
+import os, re, glob
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── image finder ──────────────────────────────────────────────────────────────
 
-def find_image(folder):
-    """Return the first image file found inside a subfolder, or None."""
-    if not os.path.isdir(folder):
+IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif')
+
+def find_image(folder_hint):
+    """
+    folder_hint is the TRUNCATED name from index.html, e.g.:
+        File_Funerary_crater_Dipylon_..._.179253
+    The actual folder on disk has the FULL name, e.g.:
+        File_Funerary_crater_Dipylon_8th_c_BCE_.179253
+    Both share the same numeric ID at the end.
+    We scan the current directory for a folder whose name ends with that ID,
+    then walk inside it for the first image file.
+    """
+    if not folder_hint:
         return None
-    for ext in ('*.jpg','*.jpeg','*.png','*.gif','*.bmp','*.webp'):
-        hits = glob.glob(os.path.join(folder, ext), recursive=False)
-        if hits:
-            return hits[0]
+
+    # Extract the numeric ID from the hint (last run of digits)
+    m = re.search(r'(\d+)\D*$', folder_hint.rstrip('/').rstrip('\\'))
+    if not m:
+        return None
+    folder_id = m.group(1)
+
+    # Find any subdirectory in cwd whose name ends with that ID
+    target_dir = None
+    try:
+        for entry in sorted(os.listdir('.')):
+            if os.path.isdir(entry) and entry.rstrip('/').endswith(folder_id):
+                target_dir = entry
+                break
+    except Exception:
+        return None
+
+    if not target_dir:
+        return None
+
+    # Walk recursively inside that folder for any image file
+    for root, dirs, files in os.walk(target_dir):
+        for fname in sorted(files):
+            if fname.lower().endswith(IMAGE_EXTS):
+                return os.path.join(root, fname)
     return None
 
-def add_heading(doc, text, level=1):
-    p = doc.add_heading(text, level=level)
+# ── document helpers ──────────────────────────────────────────────────────────
+
+def add_section(doc, text):
+    p = doc.add_heading(text, level=1)
     p.alignment = WD_ALIGN_PARAGRAPH.LEFT
     for run in p.runs:
         run.font.color.rgb = RGBColor(0x1a, 0x2e, 0x4a)
-    return p
 
 def add_artwork_title(doc, num, title):
     p = doc.add_paragraph()
-    p.paragraph_format.space_before = Pt(12)
+    p.paragraph_format.space_before = Pt(14)
     p.paragraph_format.space_after  = Pt(4)
     r1 = p.add_run(f"{num})  ")
-    r1.bold = True
-    r1.font.size = Pt(13)
+    r1.bold = True; r1.font.size = Pt(13)
     r1.font.color.rgb = RGBColor(0x1a, 0x2e, 0x4a)
     r2 = p.add_run(title)
-    r2.bold = True
-    r2.font.size = Pt(13)
+    r2.bold = True; r2.font.size = Pt(13)
     r2.font.color.rgb = RGBColor(0x1a, 0x2e, 0x4a)
-    # bottom border
     pPr = p._p.get_or_add_pPr()
     pBdr = OxmlElement('w:pBdr')
-    bottom = OxmlElement('w:bottom')
-    bottom.set(qn('w:val'), 'single')
-    bottom.set(qn('w:sz'), '6')
-    bottom.set(qn('w:color'), 'B8860B')
-    pBdr.append(bottom)
-    pPr.append(pBdr)
+    bot  = OxmlElement('w:bottom')
+    bot.set(qn('w:val'), 'single'); bot.set(qn('w:sz'), '6'); bot.set(qn('w:color'), 'B8860B')
+    pBdr.append(bot); pPr.append(pBdr)
 
 def add_image(doc, path):
     try:
@@ -66,43 +92,31 @@ def add_image(doc, path):
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_before = Pt(6)
         p.paragraph_format.space_after  = Pt(6)
-        run = p.add_run()
-        run.add_picture(path, width=Inches(4.5))
+        p.add_run().add_picture(path, width=Inches(4.5))
     except Exception as e:
-        doc.add_paragraph(f"[Image could not be loaded: {e}]")
+        doc.add_paragraph(f"[Could not embed: {path} — {e}]")
 
 def add_qa(doc, q, a):
-    # Question
     pq = doc.add_paragraph()
     pq.paragraph_format.left_indent  = Pt(18)
     pq.paragraph_format.space_before = Pt(5)
     pq.paragraph_format.space_after  = Pt(2)
     rq = pq.add_run(q)
-    rq.bold = True
-    rq.font.size = Pt(11)
+    rq.bold = True; rq.font.size = Pt(11)
     rq.font.color.rgb = RGBColor(0x1e, 0x3a, 0x5f)
-    # Answer
     pa = doc.add_paragraph()
     pa.paragraph_format.left_indent  = Pt(36)
     pa.paragraph_format.space_before = Pt(2)
     pa.paragraph_format.space_after  = Pt(6)
     ra = pa.add_run("Answer:  ")
-    ra.bold = True
-    ra.font.size = Pt(11)
+    ra.bold = True; ra.font.size = Pt(11)
     ra.font.color.rgb = RGBColor(0x16, 0x65, 0x34)
-    rb = pa.add_run(a)
-    rb.font.size = Pt(11)
-
-def page_break(doc):
-    doc.add_page_break()
+    rb = pa.add_run(a); rb.font.size = Pt(11)
 
 # ── artwork data ──────────────────────────────────────────────────────────────
-# Each entry: (number, title, subfolder_name, [(question, answer), ...])
-# subfolder_name is the EXACT folder name inside the e-course directory.
 
 ARTWORKS = [
 
-# ── POTTERY ──────────────────────────────────────────────────────────────────
 ("ANCIENT GREEK ART — POTTERY & VASE PAINTING", None, None, None),
 
 (1, "Funerary Crater, Dipylon, Athens, 8th c. BCE",
@@ -110,12 +124,12 @@ ARTWORKS = [
   ("Q1. Who made this and what is it called?", "An anonymous work known as the Dipylon Funerary Crater, made in Athens around the 8th century BCE. Named after the Dipylon Gate cemetery where similar vessels were found."),
   ("Q2. What period and style?", "The Geometric period (c. 900–700 BCE), specifically the Late Geometric phase."),
   ("Q3. What does it represent?", "A grave marker. Its painted decoration includes a prothesis (lying in state of the deceased) surrounded by mourning figures, and processions of chariots and warriors arranged in horizontal registers around the vessel."),
-  ("Q4. What stylistic characteristics are evident?", "Geometric style: all figures are reduced to schematic silhouettes made of geometric shapes (triangles for torsos, circles for heads). Composition is organized in horizontal registers. No perspective or depth — all figures are flat and symbolic. The Meander (Greek key) pattern is a signature element."),
+  ("Q4. What stylistic characteristics of this period are evident?", "Geometric style: all figures are reduced to schematic silhouettes made of geometric shapes (triangles for torsos, circles for heads). Composition organized in horizontal registers. No perspective or depth — all figures are flat and symbolic. The Meander (Greek key) pattern is a signature element."),
 ]),
 
 (2, "Polyphemus Painter, Amphora, c. 650 BCE",
  "File_Polyphemus_painter_Ampho..._.179254", [
-  ("Q1. Who made this and what is it?", "Attributed to the Polyphemus Painter (named after this work), c. 650 BCE. Orientalizing period."),
+  ("Q1. Who made this?", "Attributed to the Polyphemus Painter (named after this work), c. 650 BCE. Orientalizing period."),
   ("Q2. What period and style?", "Orientalizing period (c. 700–600 BCE) — the transitional phase between Geometric and Archaic, when Greek art absorbed Near Eastern and Egyptian influences."),
   ("Q3. What does it represent?", "One side depicts Odysseus and his men blinding the Cyclops Polyphemus (from Homer's Odyssey) — one of the earliest surviving narrative mythological scenes in Greek vase painting."),
   ("Q4. What stylistic characteristics are evident?", "Orientalizing style: animal friezes, floral and vegetal motifs (rosettes, lotus flowers) borrowed from Near Eastern art. Figures are still silhouetted but more rounded than Geometric ones. Narrative mythological scenes begin to appear."),
@@ -125,12 +139,12 @@ ARTWORKS = [
  "File_Popyphemus_Eleusis_650_BCE_.179255", [
   ("Q1. What is this work?", "The Eleusis Amphora, found at Eleusis near Athens, c. 650 BCE. Attributed to the Polyphemus Painter or his circle. Proto-Attic style."),
   ("Q2. What does it represent?", "The neck shows Odysseus blinding Polyphemus; the body shows Perseus fleeing the Gorgons after beheading Medusa. Among the earliest large-scale mythological narrative compositions in Greek art."),
-  ("Q3. What stylistic characteristics are evident?", "Uses outline drawing and incised details plus added white and red paint — more flexible than pure black silhouette. Figures are larger and more expressive than Geometric. Narrative approach reflects growing interest in Homeric epics."),
+  ("Q3. What stylistic characteristics are evident?", "Uses outline drawing and incised details plus added white and red paint. Figures are larger and more expressive than Geometric. Narrative approach reflects growing interest in Homeric epics."),
 ]),
 
 (4, "Exekias, Achilles and Penthesilea, c. 525 BCE",
  "File_Exekias_Achiles_and_Pent..._.297783", [
-  ("Q1. Who is the artist and what is the title?", "Exekias, one of the greatest Athenian black-figure painters, created this kylix (drinking cup) c. 525 BCE."),
+  ("Q1. Who is the artist?", "Exekias, one of the greatest Athenian black-figure painters, created this kylix (drinking cup) c. 525 BCE."),
   ("Q2. What period and technique?", "Late Archaic period, black-figure technique, c. 525 BCE."),
   ("Q3. What does it represent?", "Achilles kills Penthesilea, Queen of the Amazons. At the moment of her death their eyes met and Achilles fell in love with her — a moment of tragic beauty."),
   ("Q4. What stylistic characteristics are evident?", "Black-figure technique: figures painted in black slip on red clay; details incised (scratched) through the black. Exekias is celebrated for psychological depth — the locked gaze of the two figures conveys emotional intensity unusual for this period."),
@@ -138,14 +152,14 @@ ARTWORKS = [
 
 (5, "Exekias, Dionysos at Sea, c. 530 BCE",
  "File_Exekias_Dionysos_at_sea_..._.179256", [
-  ("Q1. Who is the artist and what is the title?", "Exekias, kylix interior, c. 530 BCE. The Dionysus Cup. State Collections of Antiquities, Munich."),
+  ("Q1. Who is the artist?", "Exekias, kylix interior, c. 530 BCE. The Dionysus Cup. State Collections of Antiquities, Munich."),
   ("Q2. What does it represent?", "Dionysus reclines in a boat surrounded by a sprouting grapevine and leaping dolphins. Myth: pirates tried to abduct him; he turned them into dolphins."),
   ("Q3. What stylistic characteristics are evident?", "Masterpiece of black-figure painting. Exekias uses the circular tondo format brilliantly — the boat's hull echoes the cup's shape. The grapevine fills the space with graceful organic forms. Despite the flatness of black-figure, he creates a vivid sense of sea, wind, and divine magic."),
 ]),
 
 (6, "Berlin Painter, Bell Crater: Abduction of Europa, 490 BCE",
  "File_Berlin_painter_bell_crat..._.179257", [
-  ("Q1. Who is the artist?", "Attributed to the Berlin Painter (named after a work in Berlin), c. 490 BCE. Red-figure bell crater."),
+  ("Q1. Who is the artist?", "Attributed to the Berlin Painter, c. 490 BCE. Red-figure bell crater."),
   ("Q2. What period and technique?", "Early Classical (Late Archaic) period, red-figure technique, c. 490 BCE."),
   ("Q3. What does it represent?", "Europa, a Phoenician princess, is abducted by Zeus who has transformed into a white bull, riding across the sea toward Crete."),
   ("Q4. What stylistic characteristics are evident?", "Red-figure technique: figures left in red clay while the background is painted black; internal details drawn with a fine brush — allowing greater naturalism than black-figure. The Berlin Painter is known for placing isolated figures against plain black backgrounds without ground lines, creating a monumental quality."),
@@ -176,15 +190,14 @@ ARTWORKS = [
  "File_Reed_painter_Warrior_by_..._.179265", [
   ("Q1. Who is the artist and what technique?", "The Reed Painter, c. 410 BCE. White-ground lekythos (funerary oil flask). Late Classical period."),
   ("Q2. What does it represent?", "A warrior stands by a grave stele (grave marker). White-ground lekythoi depicted mourning scenes and were used as tomb offerings."),
-  ("Q3. What stylistic characteristics are evident?", "White-ground technique: white slip surface, figures drawn in outline with added colours (red, yellow, blue). Allows a wider palette than red-figure but more fragile — used mainly for funerary items. The style is looser and more painterly, approaching actual panel painting. The quiet, melancholy mood reflects the contemplative nature of funerary art."),
+  ("Q3. What stylistic characteristics are evident?", "White-ground technique: white slip surface, figures drawn in outline with added colours (red, yellow, blue). Allows a wider palette than red-figure but more fragile — used mainly for funerary items. The style is looser and more painterly. The quiet, melancholy mood reflects the contemplative nature of funerary art."),
 ]),
 
-# ── SCULPTURE ────────────────────────────────────────────────────────────────
 ("ANCIENT GREEK ART — SCULPTURE", None, None, None),
 
 (11, "New York Kouros from Attica, c. 600 BCE",
  "File_New_York_couros_from_Att..._.179266", [
-  ("Q1. Who made this and what is it called?", "'Kouros' means 'young man' in Greek. The New York Kouros is anonymous, from Attica, c. 600 BCE. Metropolitan Museum of Art, New York."),
+  ("Q1. Who made this?", "'Kouros' means 'young man' in Greek. The New York Kouros is anonymous, from Attica, c. 600 BCE. Metropolitan Museum of Art, New York."),
   ("Q2. What period?", "Archaic period, c. 600 BCE."),
   ("Q3. What does it represent?", "A standing nude male youth — either a grave marker or a votive offering to the gods. It may represent a god, athlete, or idealized young man."),
   ("Q4. What Archaic stylistic characteristics are evident?", "Strict frontality — the figure faces directly forward. Both arms hang rigidly at the sides with clenched fists. One foot slightly advanced (Egyptian influence), but weight is distributed equally — no real movement. The anatomy is schematic and idealized. The 'Archaic smile' (slight upward curve of the lips). Hair depicted as decorative patterned beads."),
@@ -245,7 +258,7 @@ ARTWORKS = [
  "File_Wounded_Amazon_430_BCE_m..._.179273", [
   ("Q1. Who made this?", "Attributed to either Polykleitos or Phidias, c. 430 BCE. Known through Roman marble copies."),
   ("Q2. What does it represent?", "An Amazon (warrior woman) who has been wounded, shown resting with one arm raised against a pillar."),
-  ("Q3. What stylistic characteristics are evident?", "Significant as an early depiction of a female figure in a near-nude, athletic context. Shows Classical balance — pain is suggested by the raised arm and weight shift, but the face remains ideally composed. Drapery falls naturally from the waist. Represents an expansion of Classical sculptural subjects from purely athletic males to female heroic figures."),
+  ("Q3. What stylistic characteristics are evident?", "Significant as an early depiction of a female figure in a near-nude, athletic context. Shows Classical balance — pain is suggested by the raised arm and weight shift, but the face remains ideally composed. Drapery falls naturally from the waist."),
 ]),
 
 (20, "Praxiteles, Aphrodite of Knidos, c. 350 BCE",
@@ -259,7 +272,7 @@ ARTWORKS = [
  "File_Aphrodite_of_Milos_100-1..._.179289", [
   ("Q1. What is this work?", "The Aphrodite of Milos (Venus de Milo) by Alexandros of Antioch, c. 100–130 BCE. Louvre, Paris."),
   ("Q2. What period?", "Hellenistic period, c. 100–130 BCE, combining Classical idealism with Hellenistic complexity."),
-  ("Q3. What stylistic characteristics are evident?", "The sinuous S-curve and idealized facial features reflect Praxitelean influence. The dramatic twist of the torso is a Hellenistic development. The drapery loosely fallen around the hips creates a sharp contrast between the nude upper body and the clothed lower body. One of the most famous sculptures in the world."),
+  ("Q3. What stylistic characteristics are evident?", "The sinuous S-curve and idealized facial features reflect Praxitelean influence. The dramatic twist of the torso is a Hellenistic development. The drapery loosely fallen around the hips creates a sharp contrast between the nude upper body and the clothed lower body."),
 ]),
 
 (22, "Lysippos, Apoxyomenos (Scraper), c. 320 BCE",
@@ -276,7 +289,6 @@ ARTWORKS = [
   ("Q3. What is significant about this work?", "Marks the Late Classical move toward psychological and emotional expression. Unlike the confident Doryphoros, Hercules conveys weariness and vulnerability despite superhuman physical power. The contrast between his enormous body and defeated, resting posture is emotionally powerful — pointing toward Hellenistic expressiveness."),
 ]),
 
-# ── HELLENISTIC ──────────────────────────────────────────────────────────────
 ("HELLENISTIC PERIOD SCULPTURE", None, None, None),
 
 (24, "Head of Alexander the Great, marble, c. 330–300 BCE",
@@ -287,7 +299,7 @@ ARTWORKS = [
 
 (25, "Boxer at Rest (Terme Boxer), c. 100–50 BCE (bronze)",
  "File_Boxer_at_rest_bronze_330..._.179294", [
-  ("Q1. Who made this and what is its title?", "The Boxer at Rest (also: Terme Boxer, Boxer of the Quirinal), an original Greek bronze, 2nd–1st century BCE. National Museum of Rome, Palazzo Massimo alle Terme."),
+  ("Q1. Who made this and what is its title?", "The Boxer at Rest (also: Terme Boxer), an original Greek bronze, 2nd–1st century BCE. National Museum of Rome, Palazzo Massimo alle Terme."),
   ("Q2. What period?", "Hellenistic period, c. 100–50 BCE."),
   ("Q3. What does it represent?", "An elderly, heavily built boxer seated on a rock after a fight. He turns his head as if responding to someone. He wears leather boxing thongs (himantes). His face and body show a career's worth of damage — broken nose, cauliflower ears, cuts — rendered in inlaid copper."),
   ("Q4. What Hellenistic characteristics are evident?", "Hellenistic realism and psychological depth. Unlike the Classical ideal of the perfect athletic youth, this boxer is old, damaged, and vulnerable — a real, suffering individual. Inlaid copper simulates fresh blood and bruises — graphic naturalism. Hellenistic sculpture expanded subjects to include the ugly, aged, suffering, and emotionally complex."),
@@ -315,7 +327,6 @@ ARTWORKS = [
   ("Q3. What Hellenistic characteristics are evident?", "The defining example of Hellenistic Baroque style: extreme expression of suffering, movement, and emotional anguish. Figures writhe in agony, twisted in multiple planes, faces contorted with pain. Diagonal compositions, complex intertwining poses, and expression of extreme terror are key features. Enormously influential on Renaissance and Baroque artists."),
 ]),
 
-# ── ARCHITECTURE ─────────────────────────────────────────────────────────────
 ("GREEK ARCHITECTURE & TEMPLE SCULPTURE", None, None, None),
 
 (29, "Temple of Zeus at Olympia — Metope: Heracles and Atlas",
@@ -332,11 +343,11 @@ ARTWORKS = [
   ("Q3. What is the symbolic significance?", "Apollo's central, calm presence embodies Classical order, reason, and divine authority. The composition expresses the Greek cultural conflict: civilization vs. barbarism, reason vs. chaos — themes relevant to the Greek victory over the Persians."),
 ]),
 
-(31, "Phidias, Statue of Zeus in the Temple of Zeus at Olympia (reconstruction)",
+(31, "Phidias, Statue of Zeus in the Temple of Zeus at Olympia",
  "File_statue_of_Zeus_in_the_te..._.183997", [
-  ("Q1. What is this work?", "The cult statue of Zeus by Phidias, c. 435 BCE, Temple of Zeus at Olympia. One of the Seven Wonders of the Ancient World. The original is lost — known only through ancient descriptions."),
+  ("Q1. What is this work?", "The cult statue of Zeus by Phidias, c. 435 BCE, Temple of Zeus at Olympia. One of the Seven Wonders of the Ancient World. The original is lost."),
   ("Q2. What did it represent?", "Zeus seated on a magnificent throne, chryselephantine (gold and ivory over a wooden core), approximately 12–13 metres tall."),
-  ("Q3. What is its significance?", "Considered by the ancients one of the greatest works ever made. The scale and material luxury (gold and ivory) made it a visible expression of divine and civic power. Phidias was also responsible for the Athena Parthenos and the sculptural program of the Parthenon."),
+  ("Q3. What is its significance?", "Considered by the ancients one of the greatest works ever made. Phidias was also responsible for the Athena Parthenos and the sculptural program of the Parthenon — making him the most important artist of the Classical period."),
 ]),
 
 (32, "The Parthenon, Athens, 447–432 BCE",
@@ -367,7 +378,6 @@ ARTWORKS = [
   ("Q3. What Late Classical stylistic characteristics are evident?", "'Rich style': the drapery is complex, thin, and fluid, clinging to and revealing the body beneath in the 'wet drapery' effect — the garment appears almost transparent. An intimate, casual pose is a departure from the grand frontal poses of the High Classical period."),
 ]),
 
-# ── EARLY RENAISSANCE ─────────────────────────────────────────────────────────
 ("EARLY RENAISSANCE (c. 1400–1490)", None, None, None),
 
 (36, "Masaccio, The Expulsion from Eden, c. 1427",
@@ -403,7 +413,7 @@ ARTWORKS = [
  "File__Botticelli_The_birth_of..._.189631", [
   ("Q1. Who is the artist?", "Sandro Botticelli, c. 1484–1486. Uffizi Gallery, Florence."),
   ("Q2. What does it represent?", "Venus (goddess of love, born from sea foam) arrives on the shore of Cyprus on a giant scallop shell. Zephyr (wind god) blows her toward shore. The Hora (goddess of spring) rushes to clothe her."),
-  ("Q3. What Early Renaissance characteristics are evident?", "Connected to the Neoplatonic circle around Lorenzo de' Medici: Venus represents divine beauty (the Neoplatonic concept of Celestial Venus). Sinuous flowing lines rather than Masaccio's weighty realism. The mythological subject (not religious) reflects humanist interest in classical antiquity. The nude female echoes Greek sculpture (Venus Pudica pose)."),
+  ("Q3. What Early Renaissance characteristics are evident?", "Connected to the Neoplatonic circle around Lorenzo de' Medici: Venus represents divine beauty. Sinuous flowing lines rather than Masaccio's weighty realism. The mythological subject (not religious) reflects humanist interest in classical antiquity. The nude female echoes Greek sculpture (Venus Pudica pose)."),
   ("Q4. What connection to ancient Greek culture does this work demonstrate?", "Direct: Venus is a goddess from the classical pantheon (Greek: Aphrodite). In terms of art: Botticelli revives Classical Greek ideals of beauty, harmony, and proportion — particularly the Venus Pudica type — and combines them with Renaissance humanism, celebrating the human body as noble and divine rather than sinful."),
 ]),
 
@@ -441,7 +451,6 @@ ARTWORKS = [
   ("Q3. What characteristics are evident?", "Painted for a humanist patron as an allegory of the arts. The precise, crystalline quality of the landscape is typical of North Italian Renaissance art. The scene celebrates music, poetry, and the arts — appropriate for a private studiolo celebrating learning and culture."),
 ]),
 
-# ── HIGH RENAISSANCE ─────────────────────────────────────────────────────────
 ("HIGH RENAISSANCE (c. 1490–1527)", None, None, None),
 
 (46, "Leonardo da Vinci, The Last Supper, 1495–1498",
@@ -475,14 +484,14 @@ ARTWORKS = [
 (50, "Michelangelo, David, 1501–1504 (marble)",
  "File_Michelangelo_David_.190402", [
   ("Q1. Who is the artist?", "Michelangelo Buonarroti, 1501–1504. Galleria dell'Accademia, Florence."),
-  ("Q2. What does it represent?", "David before his battle with Goliath — the moment before the fight. David is alert, tense, assessing his enemy, his sling over his shoulder. Unlike Donatello's post-battle David, this is the pre-battle moment of decision."),
+  ("Q2. What does it represent?", "David before his battle with Goliath — the moment before the fight. David is alert, tense, assessing his enemy, his sling over his shoulder."),
   ("Q3. What High Renaissance characteristics are evident?", "Michelangelo revives and surpasses Classical ideals: idealized yet intensely naturalistic anatomy, unprecedented mastery of musculature. Contrapposto recalls the Doryphoros but the psychological tension (taut focused gaze, swollen neck vein, clenched fist) is entirely Renaissance. Over 5 metres tall — a monument of civic and humanist pride."),
 ]),
 
 (51, "Michelangelo, Pietà, 1498–1499 (marble)",
  "File__Michelangelo_Pieta_.190403", [
   ("Q1. Who is the artist?", "Michelangelo Buonarroti, 1498–1499. St. Peter's Basilica, Vatican City. He was 23–24 when he completed it. The only work he ever signed."),
-  ("Q2. What does it represent?", "The Virgin Mary holds the dead body of Christ after the crucifixion. 'Pietà' (Italian: 'pity')."),
+  ("Q2. What does it represent?", "The Virgin Mary holds the dead body of Christ after the crucifixion."),
   ("Q3. What characteristics are evident?", "Michelangelo solved the compositional problem of a seated woman holding an adult man's limp body by spreading Mary's garments into a broad pyramidal base. Mary appears remarkably young. Technical virtuosity: drapery carved with hairlike delicacy; Christ's body idealized and serene. Classical idealization combined with Christian devotion."),
 ]),
 
@@ -521,7 +530,6 @@ ARTWORKS = [
   ("Q2. What is its significance?", "Considered the first psychologically penetrating papal portrait. Julius appears not as a triumphant symbol of power but as a weary, contemplative human being — his downward gaze and slightly hunched posture suggest the burdens of his office. This psychological realism follows Leonardo's innovations."),
 ]),
 
-# ── VENETIAN SCHOOL ──────────────────────────────────────────────────────────
 ("VENETIAN SCHOOL (c. 1490–1600)", None, None, None),
 
 (57, "Giorgione, Pastoral Symphony (Fête champêtre), c. 1508–1509",
@@ -585,7 +593,6 @@ ARTWORKS = [
   ("Q3. What Venetian/Mannerist characteristics are evident?", "The turbulent sea and storm-lit sky create overwhelming dramatic atmosphere. Unlike calm High Renaissance compositions, Tintoretto emphasises the power of nature and divine intervention over the small human figures. Dramatic chiaroscuro and swirling composition."),
 ]),
 
-# ── MANNERISM ────────────────────────────────────────────────────────────────
 ("MANNERISM (c. 1520–1600)", None, None, None),
 
 (66, "El Greco, The Burial of Count Orgaz, 1586–1588",
@@ -595,10 +602,11 @@ ARTWORKS = [
   ("Q3. What Mannerist characteristics are evident?", "The painting is divided into two zones: realistic earthly scene (bottom) and heavenly vision above — a Mannerist distortion of natural space. El Greco's characteristic elongated figures, impossibly narrow bodies, and spiritual otherworldly atmosphere define Mannerism. Cool, supernatural light — not natural sunlight. Abandonment of Renaissance mathematical perspective in favour of spiritual hierarchy."),
 ]),
 
-(67, "El Greco, Pietà (Laocoön), c. 1571–1576 / 1610–1614",
+(67, "El Greco, Laocoön, c. 1610–1614",
  "File_El_Greco_Laocoon_and_his..._.191088", [
-  ("Q1. Who is the artist?", "El Greco (Doménikos Theotokópoulos). Mannerist period."),
-  ("Q2. What Mannerist characteristics are evident?", "Elongated, twisting figures that defy natural proportions; cool, luminous, unnatural palette; compressed, shallow space pushing all figures to the foreground; tense, emotionally overwrought atmosphere. Compare with Michelangelo's Pietà (High Renaissance): serene, balanced, classical. El Greco's: anguished, distorted, spiritually intense — the Mannerist departure from Renaissance harmony."),
+  ("Q1. Who is the artist?", "El Greco (Doménikos Theotokópoulos), c. 1610–1614. National Gallery of Art, Washington, D.C."),
+  ("Q2. What does it represent?", "The Trojan priest Laocoön and sons killed by serpents. El Greco sets the scene before Toledo (his city) rather than Troy, and adds two additional figures (possibly Adam and Eve)."),
+  ("Q3. What Mannerist characteristics are evident?", "Radically different from the Hellenistic sculpture: figures are elongated, twisting, and otherworldly; the landscape dissolves in dark storm clouds; the scene has the quality of a nightmare or vision. El Greco identifies Laocoön's suffering with the human condition — a deeply Christian, post-Reformation reading of a classical myth."),
 ]),
 
 (68, "Bronzino, Venus, Cupid, Folly and Time (Allegory), c. 1545",
@@ -614,7 +622,6 @@ ARTWORKS = [
   ("Q2. What is its historical significance?", "Veronese was summoned before the Inquisition to explain the 'indecorous' elements (dwarfs, dogs, drunken soldiers). His defence — that painters have the same licence as poets to interpret subjects — anticipates modern ideas of artistic freedom. Rather than repaint, he simply changed the title."),
 ]),
 
-# ── BAROQUE ──────────────────────────────────────────────────────────────────
 ("BAROQUE (c. 1600–1750)", None, None, None),
 
 (70, "Bernini, David, 1623–1624 (marble)",
@@ -707,7 +714,6 @@ ARTWORKS = [
   ("Q3. What is its significance?", "One of the most philosophically meditated images in Western art. The shepherds try to decipher the inscription just as we do. Poussin's Classical style: clear, balanced composition; serene golden light; figures with the dignity of antique sculpture; a landscape of perfect ordered beauty. The tone is contemplative, elegiac — not dramatic."),
 ]),
 
-# ── ROCOCO ───────────────────────────────────────────────────────────────────
 ("ROCOCO (c. 1720–1780)", None, None, None),
 
 (83, "Fragonard, The Swing, 1767",
@@ -737,7 +743,6 @@ ARTWORKS = [
   ("Q2. How does Boucher's treatment compare to Titian's and Rubens's?", "Titian (Venetian Renaissance): dynamic, turbulent sea, Europa tilted in terror and excitement, overwhelming divine power. Rubens (Baroque): large dynamic bodies, violent energy. Boucher (Rococo): lightness, pastel colours, decorative prettiness, Europa appears charmed and happy. The violent myth is drained of all dramatic content in favour of visual pleasure."),
 ]),
 
-# ── NEOCLASSICISM ────────────────────────────────────────────────────────────
 ("NEOCLASSICISM (c. 1780–1820)", None, None, None),
 
 (87, "Jacques-Louis David, The Death of Marat, 1793",
@@ -752,7 +757,7 @@ ARTWORKS = [
  "File__David_Napoleon_crossing..._.195392", [
   ("Q1. Who is the artist?", "Jacques-Louis David, 1787. Metropolitan Museum of Art, New York."),
   ("Q2. What does it represent?", "From Plato's Phaedo: Socrates, condemned to death for impiety, drinks hemlock surrounded by grieving disciples. He gestures upward toward the realm of Ideas, accepting death with philosophical serenity."),
-  ("Q3. What Neoclassical characteristics are evident?", "(1) Classical subject from ancient history/philosophy; (2) Moral didacticism — a model of heroic virtue, stoic acceptance of death for principles; (3) Sculptural, frieze-like arrangement of figures; (4) Clear, uncluttered composition with cool, even lighting (opposed to Baroque tenebrism); (5) Somber dignity rather than emotional excess."),
+  ("Q3. What Neoclassical characteristics are evident?", "(1) Classical subject from ancient history/philosophy; (2) Moral didacticism — a model of heroic virtue, stoic acceptance of death for principles; (3) Sculptural, frieze-like arrangement of figures; (4) Clear, uncluttered composition with cool, even lighting; (5) Somber dignity rather than emotional excess."),
 ]),
 
 (89, "Jacques-Louis David, Napoleon Crossing the Alps, 1800–1801",
@@ -762,7 +767,6 @@ ARTWORKS = [
   ("Q3. What Neoclassical characteristics are evident?", "Napoleon presented as the inheritor of Hannibal and Charlemagne — a historical hero of classical stature. (In reality, Napoleon crossed on a mule; he requested David paint him 'calm upon a fiery steed.') Neoclassical characteristics: heroic idealisation; reference to classical and historical precedent; formal, monumental composition; the figure as moral and political ideal."),
 ]),
 
-# ── 19TH CENTURY ─────────────────────────────────────────────────────────────
 ("19TH CENTURY — ADDITIONAL", None, None, None),
 
 (90, "Karl Briullov, The Last Day of Pompeii, 1830–1833",
@@ -774,53 +778,49 @@ ARTWORKS = [
 
 ]  # end ARTWORKS
 
-
-# ── build document ────────────────────────────────────────────────────────────
+# ── build document ─────────────────────────────────────────────────────────────
 
 doc = Document()
-
-# page margins
 for section in doc.sections:
-    section.top_margin    = section.bottom_margin = Inches(1)
-    section.left_margin   = section.right_margin  = Inches(1)
+    section.top_margin    = Inches(1)
+    section.bottom_margin = Inches(1)
+    section.left_margin   = Inches(1)
+    section.right_margin  = Inches(1)
 
-# title
 t = doc.add_heading("Art History — Complete Study Guide", 0)
 t.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
 sub = doc.add_paragraph("Ancient Greece · Renaissance · Mannerism · Baroque · Rococo · Neoclassicism")
 sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
 sub.runs[0].font.color.rgb = RGBColor(0x55, 0x55, 0x55)
-
 doc.add_page_break()
+
+found = missed = 0
 
 for entry in ARTWORKS:
     if entry[1] is None:
-        # section header
-        doc.add_heading(entry[0], level=1)
+        add_section(doc, entry[0])
         continue
 
-    num, title, folder, qas = entry
-
+    num, title, folder_hint, qas = entry
     add_artwork_title(doc, num, title)
 
-    # image
-    img_path = find_image(folder) if folder else None
+    img_path = find_image(folder_hint)
     if img_path:
         add_image(doc, img_path)
+        found += 1
+        print(f"  ✅  {num}. {title[:55]}")
     else:
-        p = doc.add_paragraph(f"[Image not found — check folder: {folder}]")
+        p = doc.add_paragraph(f"[Image not found — folder ID: {folder_hint}]")
         p.runs[0].font.color.rgb = RGBColor(0xAA, 0xAA, 0xAA)
         p.runs[0].font.italic = True
+        missed += 1
+        print(f"  ❌  {num}. {title[:55]}")
 
-    # Q&A
     for q, a in qas:
         add_qa(doc, q, a)
-
-    doc.add_paragraph("")  # spacer
-
+    doc.add_paragraph("")
 
 out = "Art_History_Study_Guide.docx"
 doc.save(out)
-print(f"\n✅  Done!  Saved as: {out}")
-print(f"   Artworks processed: {sum(1 for e in ARTWORKS if e[1] is not None)}")
+print(f"\n✅  Saved: {out}")
+print(f"   Images found: {found}  |  Missing: {missed}")
